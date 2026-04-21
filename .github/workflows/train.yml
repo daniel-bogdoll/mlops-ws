@@ -1,0 +1,63 @@
+name: Train And Deploy
+
+on:
+  push:
+    paths:
+      - 'training/**'
+    branches:
+      - main
+
+jobs:
+  train-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install scikit-learn==1.7.1 pandas flask
+
+      - name: Detect new or modified training file and run it
+        run: |
+          # Get list of added or modified files in the push
+          FILES=$(git diff --name-only ${{ github.sha }} ${{ github.sha }}~1)
+          echo "Changed files:"
+          echo "$FILES"
+
+          # Loop through files in /training and execute them
+          for f in $FILES; do
+            if [[ $f == training/*.py ]]; then
+              echo "Running newly changed training file: $f"
+              python "$f"
+            fi
+          done
+
+      - name: Build Docker image
+        run: |
+          IMAGE_NAME=petz2000/model-serving
+          IMAGE_TAG=${{ github.sha }}
+          docker build . --file Dockerfile --tag $IMAGE_NAME:$IMAGE_TAG
+          docker tag $IMAGE_NAME:$IMAGE_TAG $IMAGE_NAME:latest
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Push Docker image
+        run: |
+          IMAGE_NAME=petz2000/model-serving
+          IMAGE_TAG=${{ github.sha }}
+          docker push $IMAGE_NAME:$IMAGE_TAG
+          docker push $IMAGE_NAME:latest
